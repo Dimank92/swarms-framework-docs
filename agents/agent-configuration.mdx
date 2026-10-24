@@ -257,12 +257,15 @@ The `Agent` class provides extensive configuration options to customize behavior
 
 In addition to the streaming flags above, the `Agent` exposes two streaming methods that yield tokens as a generator. They are real LLM streaming — tokens are forwarded the moment LiteLLM emits them, across **every loop** of the agent (tool-call turns, synthesis turns, autonomous plan/execute/summary phases).
 
-#### `agent.run_stream(task) -> Iterator[str]`
+#### `agent.run_stream(task, events=False) -> Iterator[str | StreamEvent]`
 
 Sync generator that yields tokens. The agent runs in a background thread; tokens are pushed onto a queue and yielded to the caller in order.
 
+* **`events=False` (default)**: Yields raw token strings as `Iterator[str]`.
+* **`events=True`**: Yields structured `StreamEvent(kind, text)` dataclass instances as `Iterator[StreamEvent]`.
+
 ```python
-from swarms import Agent
+from swarms import Agent, StreamEvent
 
 agent = Agent(
     agent_name="Writer",
@@ -270,17 +273,32 @@ agent = Agent(
     max_loops=3,
 )
 
+# Standard token stream
 for token in agent.run_stream("Write a short poem about distributed systems."):
     print(token, end="", flush=True)
+
+# Typed event stream with distinct reasoning, content, tool_call, and final results
+for event in agent.run_stream("Analyze system metrics and generate recommendations.", events=True):
+    if event.kind == "reasoning":
+        print(f"[Thinking]: {event.text}", end="", flush=True)
+    elif event.kind == "content":
+        print(event.text, end="", flush=True)
+    elif event.kind == "tool_call":
+        print(f"\n[Tool Execution]: {event.text}\n")
+    elif event.kind == "final":
+        print(f"\n[Run Completed]: Final output matches run() -> {event.text}")
 ```
 
-#### `agent.arun_stream(task) -> AsyncIterator[str]`
+#### `agent.arun_stream(task, events=False) -> AsyncIterator[str | StreamEvent]`
 
 Async generator. Same semantics as `run_stream`, but the agent loop runs in a thread executor while tokens are forwarded through an `asyncio.Queue`, so the caller's event loop is never blocked.
 
+* **`events=False` (default)**: Asynchronously yields raw token strings.
+* **`events=True`**: Asynchronously yields typed `StreamEvent` instances.
+
 ```python
 import asyncio
-from swarms import Agent
+from swarms import Agent, StreamEvent
 
 agent = Agent(
     agent_name="Writer",
@@ -289,14 +307,17 @@ agent = Agent(
 )
 
 async def main():
-    async for token in agent.arun_stream("Explain async/await in two sentences."):
-        print(token, end="", flush=True)
+    async for event in agent.arun_stream("Explain async/await in two sentences.", events=True):
+        if event.kind == "content":
+            print(event.text, end="", flush=True)
+        elif event.kind == "final":
+            print(f"\nCompleted result: {event.text}")
 
 asyncio.run(main())
 ```
 
 <Note>
-  Both methods stream tokens through every internal loop, including tool calls, synthesis turns after a tool returns, and the autonomous plan/execute/summary cycle when `max_loops="auto"`. Streamed calls are counted in `agent.usage` once the stream has been consumed.
+  Both methods stream tokens through every internal loop, including tool calls, synthesis turns after a tool returns, and the autonomous plan/execute/summary cycle when `max_loops="auto"`. When `events=True`, the stream concludes with exactly one `final` event whose `text` contains the return value of `agent.run()`. Streamed calls are counted in `agent.usage` once the stream has been consumed.
 </Note>
 
 <ParamField path="verbose" type="bool" default="False">

@@ -90,6 +90,70 @@ print("\n", agent.usage)
 
 `run_stream()` and `arun_stream()` run the agent through `run()` on a background thread. With `max_loops="auto"` they enter the autonomous loop, and tokens from every LLM turn, including turns that follow tool calls, come through the same stream. Exceptions raised in the run are re-raised once the stream ends.
 
+## Typed Stream Events (`events=True`)
+
+By default, `run_stream` and `arun_stream` yield raw strings. When interacting with models that support chain-of-thought reasoning or when using tool calls, string streaming interleaves thinking text and tool signatures with the actual message content.
+
+Passing `events=True` unlocks structured `StreamEvent` objects:
+
+```python
+from swarms import Agent, StreamEvent
+
+agent = Agent(
+    agent_name="ResearchAnalyst",
+    model_name="gpt-5.4",
+    max_loops=2,
+)
+
+# Iterate over typed StreamEvent instances
+for event in agent.run_stream("Analyze recent trends in autonomous agent architectures.", events=True):
+    if event.kind == "reasoning":
+        # Raw reasoning / thinking tokens (without [thinking] string markers)
+        print(f"\033[90m{event.text}\033[0m", end="", flush=True)
+    elif event.kind == "content":
+        # Main model output tokens intended for user presentation
+        print(event.text, end="", flush=True)
+    elif event.kind == "tool_call":
+        # Streamed tool execution payload
+        print(f"\n[Invoking Tool]: {event.text}\n")
+    elif event.kind == "final":
+        # Emitted exactly once at the end; carries the full return value of run()
+        print(f"\n--- Final Result ---\n{event.text}")
+```
+
+### Event Kinds Reference
+
+| `kind` | Description | `event.text` Value |
+|---|---|---|
+| `"reasoning"` | Model's internal chain-of-thought tokens | Raw thinking text fragment |
+| `"content"` | Final generated message tokens for the caller | Raw content text fragment (joining all content events reproduces the full response) |
+| `"tool_call"` | Active tool invocation metadata and arguments | Function call signature / JSON argument fragment |
+| `"final"` | Terminal event marking completion | The exact formatted return value of `agent.run()` |
+
+### Async Streaming with `arun_stream`
+
+For asynchronous applications (such as FastAPI or WebSocket endpoints), use `arun_stream` with `events=True`:
+
+```python
+import asyncio
+from swarms import Agent, StreamEvent
+
+agent = Agent(
+    agent_name="Assistant",
+    model_name="gpt-5.4",
+    max_loops=1,
+)
+
+async def stream_agent_events():
+    async for event in agent.arun_stream("Summarize the benefits of event-driven architectures.", events=True):
+        if event.kind == "content":
+            yield event.text
+        elif event.kind == "final":
+            print(f"\nFull run completed: {event.text}")
+
+asyncio.run(stream_agent_events())
+```
+
 See [Agent Configuration](/agents/agent-configuration#streaming-methods) for `arun_stream()` and the detailed `stream=True` mode, and [Token usage](/agents/token-usage) for what `agent.usage` reports.
 
 ## Connect With Us
