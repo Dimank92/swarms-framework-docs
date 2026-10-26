@@ -136,7 +136,7 @@ print([skill["name"] for skill in agent.skills_metadata])
 After a run, `agent.skills_metadata` lists the skills the last matching run selected.
 
 <Tip>
-  Matching compares words, not meaning, so a task that paraphrases a skill can score below the threshold. Check the scores with `DynamicSkillsLoader("./skills").get_similarity_scores(task)` from `swarms.structs.dynamic_skills_loader`, and write descriptions that use the words your tasks use.
+  Matching compares words, not meaning, so a task that paraphrases a skill can score below the threshold. Check the scores with `DynamicSkillsLoader("./skills", similarity_threshold=0).load_relevant_skills(task)` from `swarms.structs.dynamic_skills_loader`, which returns every skill with a `similarity_score` key, highest first. Write descriptions that use the words your tasks use.
 </Tip>
 
 ### Loading Every Skill on Every Run
@@ -441,8 +441,11 @@ relevant_skills = loader.load_relevant_skills(
 )
 print(f"Loaded {len(relevant_skills)} relevant skills")
 
-# Every skill's score for the task
-print(loader.get_similarity_scores("Perform financial analysis"))
+# Every skill's score for the task (threshold 0 returns all skills with their scores)
+scores_loader = DynamicSkillsLoader(skills_dir="./skills", similarity_threshold=0)
+all_scores = scores_loader.load_relevant_skills("Perform financial analysis")
+for skill in all_scores:
+    print(skill["name"], skill.get("similarity_score"))
 ```
 
 ## Best Practices
