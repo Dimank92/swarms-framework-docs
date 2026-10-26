@@ -11,7 +11,7 @@ The `AgentLoader` class provides a unified interface for instantiating `Agent` o
 | Format | Extension | Backing loader |
 |---|---|---|
 | Markdown | `.md` | `load_agents_from_markdown` |
-| YAML | `.yaml` | `create_agents_from_yaml` |
+| YAML | `.yaml` | `load_agents_from_yaml` |
 | CSV | `.csv` | `CSVAgentLoader` |
 
 Extensions are matched exactly: `auto()` does not accept `.yml` or upper-case extensions.
@@ -130,23 +130,32 @@ The parsed `mcp_url` field is typed as an integer, so a URL in the frontmatter f
 
 ### load_agents_from_yaml()
 
-Load agents from a single YAML file through `create_agents_from_yaml`.
+Load agents from a single YAML file or YAML string.
 
 ```python
 def load_agents_from_yaml(
     self,
-    yaml_file: str,
+    yaml_file: Optional[str] = None,
     return_type: ReturnTypes = "auto",
+    yaml_string: Optional[str] = None,
     **kwargs,
 )
 ```
 
-<ParamField path="yaml_file" type="str">
+<ParamField path="yaml_file" type="Optional[str]" default="None">
   Path to the YAML definitions file. It needs an `agents` list and may have a `swarm_architecture` section.
 </ParamField>
 
 <ParamField path="return_type" type="ReturnTypes" default='"auto"'>
-  Controls the return shape. One of `"auto"`, `"agents"`, `"both"`, `"swarm"`, `"run_swarm"`, `"tasks"`.
+  Controls the return shape. One of `"auto"`, `"agents"`, `"both"`, `"swarm"`, `"run_swarm"`.
+</ParamField>
+
+<ParamField path="yaml_string" type="Optional[str]" default="None">
+  Raw YAML string content to parse directly instead of reading from a file.
+</ParamField>
+
+<ParamField path="**kwargs" type="Any">
+  Override the parsed configuration for every agent, for example `model_name="gpt-4o"`.
 </ParamField>
 
 | `return_type` | Returns |
@@ -155,7 +164,8 @@ def load_agents_from_yaml(
 | `"agents"` | One `Agent` if the file defines one agent, otherwise a `List[Agent]` |
 | `"both"` | A tuple of the `"auto"` result and the full agent list |
 | `"swarm"`, `"run_swarm"` | Runs the `SwarmRouter` on `swarm_architecture.task` and returns its output |
-| `"tasks"` | An empty list |
+
+YAML agents use the standard `Agent` defaults. Nested `model:` configuration blocks are applied to the underlying model, and custom agent parameters in the YAML pass through via `AgentConfig`.
 
 <Warning>
 `"swarm"` and `"run_swarm"` execute the swarm, which calls the model. They raise `ValueError` when the file has no `swarm_architecture` or no `task`.
