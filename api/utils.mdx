@@ -718,7 +718,7 @@ If `WORKSPACE_DIR` is unset, the manager sets it to `./agent_workspace` before c
 </ParamField>
 
 <ParamField path="use_timestamp" type="bool" default="True">
-  Timestamp in the directory name when `True`, otherwise a short UUID
+  Timestamp before a short UUID in the directory name when `True`, otherwise the UUID alone. The UUID keeps two swarms with the same name, started in the same second, in separate directories
 </ParamField>
 
 <ParamField path="verbose" type="bool" default="False">
