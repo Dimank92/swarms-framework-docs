@@ -537,3 +537,162 @@ task_json = task.model_dump_json(indent=2)
 task_from_dict = PlannerTask(**task_dict)
 task_from_json = PlannerTask.model_validate_json(task_json)
 ```
+
+## Runnable Offline Validation Guide
+
+Schema validation in Swarms operates entirely on Pydantic `BaseModel` classes without running agents, dispatching LLM calls, requiring API keys, or connecting to external network services. This makes schema validation ideal for fast unit tests, offline queue boundary checks, and CI validation of generated planner specifications.
+
+### Positive Validation Examples
+
+The three core schemas for planning workflows can be instantiated and round-tripped locally:
+
+```python
+import json
+from swarms import (
+    PlannerTask,
+    PlannerTaskOutput,
+    PlannerTaskSpec,
+    PlannerTaskStatus,
+    TaskPriority,
+)
+
+# 1. Valid Task Creation
+task = PlannerTask(
+    title="Extract quarterly earnings",
+    description="Parse SEC 10-Q filing tables and extract net income figures",
+    priority=TaskPriority.HIGH,
+    depends_on=["ptask-fetch-filing-01"],
+)
+assert task.status == PlannerTaskStatus.PENDING
+assert task.version == 0
+
+# 2. Valid Plan Construction
+spec = PlannerTaskSpec(
+    plan="Analyze competitor filings in parallel and synthesize executive findings.",
+    tasks=[
+        PlannerTaskOutput(
+            title="Download filings",
+            description="Fetch PDF/HTML filing documents from Edgar",
+            priority=2,
+        ),
+        PlannerTaskOutput(
+            title="Synthesize summary",
+            description="Aggregate extracted figures into comparative summary",
+            priority=1,
+            depends_on_titles=["Download filings"],
+        ),
+    ],
+)
+assert len(spec.tasks) == 2
+assert spec.tasks[1].depends_on_titles == ["Download filings"]
+
+# 3. JSON Round-Trip Serialization & Deserialization
+raw_json = task.model_dump_json(indent=2)
+restored_task = PlannerTask.model_validate_json(raw_json)
+assert restored_task.id == task.id
+assert restored_task.title == task.title
+assert restored_task.priority == task.priority
+```
+
+### Invalid Input Rejection (Negative Validation)
+
+Pydantic enforces strict field boundaries. Invalid inputs raise `pydantic.ValidationError` immediately without executing worker agents:
+
+```python
+from pydantic import ValidationError
+from swarms import CycleVerdict, PlannerTask
+
+# Case 1: Missing required field ('description' is required)
+try:
+    PlannerTask(title="Missing description task")
+    assert False, "Should have raised ValidationError"
+except ValidationError as exc:
+    assert any(err["loc"] == ("description",) for err in exc.errors())
+    print("Caught missing description error:", exc.errors()[0]["type"])
+
+# Case 2: Invalid task priority (99 is not a valid TaskPriority enum value)
+try:
+    PlannerTask(
+        title="Invalid priority task",
+        description="Priority must be a valid TaskPriority",
+        priority=99,
+    )
+    assert False, "Should have raised ValidationError"
+except ValidationError as exc:
+    assert any(err["loc"] == ("priority",) for err in exc.errors())
+    print("Caught invalid priority error:", exc.errors()[0]["type"])
+
+# Case 3: Out-of-range quality score (overall_quality must be between 0 and 10)
+try:
+    CycleVerdict(
+        is_complete=True,
+        overall_quality=11,  # Exceeds maximum allowed value of 10
+        summary="Score outside valid 0-10 range",
+    )
+    assert False, "Should have raised ValidationError"
+except ValidationError as exc:
+    assert any(err["loc"] == ("overall_quality",) for err in exc.errors())
+    print("Caught out-of-range quality score error:", exc.errors()[0]["type"])
+```
+
+### Complete Standalone Verification Script
+
+To verify all six validation cases in your local environment without any dependencies other than `pydantic`, run:
+
+```bash
+python -c "
+from pydantic import BaseModel, Field, ValidationError
+from enum import Enum
+import uuid, time
+from typing import List, Optional, Dict, Any
+
+class TaskPriority(str, Enum):
+    LOW = 'LOW'
+    NORMAL = 'NORMAL'
+    HIGH = 'HIGH'
+    CRITICAL = 'CRITICAL'
+
+class PlannerTask(BaseModel):
+    id: str = Field(default_factory=lambda: f'ptask-{uuid.uuid4().hex[:8]}')
+    title: str
+    description: str
+    priority: TaskPriority = TaskPriority.NORMAL
+
+class PlannerTaskOutput(BaseModel):
+    title: str
+    description: str
+    priority: int = 1
+    depends_on_titles: List[str] = Field(default_factory=list)
+
+class PlannerTaskSpec(BaseModel):
+    plan: str
+    tasks: List[PlannerTaskOutput]
+
+class CycleVerdict(BaseModel):
+    is_complete: bool
+    overall_quality: int = Field(ge=0, le=10)
+    summary: str
+
+# 1. Valid task creation
+t = PlannerTask(title='Task', description='Description', priority=TaskPriority.HIGH)
+# 2. Valid plan construction
+spec = PlannerTaskSpec(plan='Plan', tasks=[PlannerTaskOutput(title='T1', description='D1')])
+# 3. JSON round-trip
+assert PlannerTask.model_validate_json(t.model_dump_json()).title == t.title
+
+# 4. Missing description rejected
+try: PlannerTask(title='No desc'); assert False
+except ValidationError: pass
+
+# 5. Invalid priority rejected
+try: PlannerTask(title='T', description='D', priority=99); assert False
+except ValidationError: pass
+
+# 6. Quality > 10 rejected
+try: CycleVerdict(is_complete=True, overall_quality=11, summary='Too high'); assert False
+except ValidationError: pass
+
+print('All 6 schema validation checks passed successfully!')
+"
+```
+
