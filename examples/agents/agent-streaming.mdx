@@ -90,6 +90,67 @@ print("\n", agent.usage)
 
 `run_stream()` and `arun_stream()` run the agent through `run()` on a background thread. With `max_loops="auto"` they enter the autonomous loop, and tokens from every LLM turn, including turns that follow tool calls, come through the same stream. Exceptions raised in the run are re-raised once the stream ends.
 
+## Typed stream events
+
+By default, `run_stream()` and `arun_stream()` yield plain strings with `[thinking]` and `[tool call]` markers. When you need structured access to token types without parsing marker strings, pass `events=True`. Callers receive `StreamEvent` objects (exported directly from `swarms`) with a `kind` attribute and raw token `text`:
+
+```python
+from swarms import Agent, StreamEvent
+
+agent = Agent(
+    agent_name="StoryAgent",
+    model_name="gpt-5.4",
+    max_loops=1,
+)
+
+final_result = None
+for event in agent.run_stream(
+    "Tell me a short story about a lighthouse keeper",
+    events=True,
+):
+    if event.kind == "reasoning":
+        print(f"[thinking] {event.text}", end="", flush=True)
+    elif event.kind == "content":
+        print(event.text, end="", flush=True)
+    elif event.kind == "tool_call":
+        print(f"[tool call] {event.text}", end="", flush=True)
+    elif event.kind == "final":
+        final_result = event.text
+
+print("\n\nCompleted response:\n", final_result)
+```
+
+The same `events=True` argument works on `arun_stream()`:
+
+```python
+import asyncio
+from swarms import Agent
+
+agent = Agent(agent_name="StoryAgent", model_name="gpt-5.4", max_loops=1)
+
+async def main():
+    async for event in agent.arun_stream("Tell me a short story", events=True):
+        if event.kind == "content":
+            print(event.text, end="", flush=True)
+        elif event.kind == "final":
+            print("\nDone:", event.text)
+
+asyncio.run(main())
+```
+
+### Event kinds
+
+| `kind` | Description | `event.text` |
+|---|---|---|
+| `content` | Text fragments that concatenate into the assistant's reply. Side calls such as the tool summary also arrive as `content` events. | Raw fragment string without extra section markers. |
+| `reasoning` | Chain-of-thought tokens from reasoning models. | Raw reasoning token string without the `[thinking]` banner. |
+| `tool_call` | Tool invocation descriptors and arguments. | Raw tool call signature and arguments without `[tool call]` headers. |
+| `final` | Produced exactly once at the end of the stream. | The complete return value of `run()`, preserving any formatted output structure. |
+
+Because `content` fragments join back into the reply text and side calls such as the tool summary also arrive as `content` events, always read the run's final result from the `final` event rather than accumulating fragments.
+
+Without `events=True`, both `run_stream()` and `arun_stream()` keep the default plain string stream with `[thinking]` and `[tool call]` markers.
+
 See [Agent Configuration](/agents/agent-configuration#streaming-methods) for `arun_stream()` and the detailed `stream=True` mode, and [Token usage](/agents/token-usage) for what `agent.usage` reports.
 
 ## Connect With Us
